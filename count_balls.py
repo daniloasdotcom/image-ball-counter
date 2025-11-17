@@ -1,14 +1,15 @@
-# ativar cron
 import os
 import json
-import base64
 import numpy as np
 import cv2
-
+from ultralytics import YOLO
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 FOLDER_ID = os.environ.get("DRIVE_FOLDER_ID")
+
+# modelo leve, ideal para CI/CD
+model = YOLO("yolov8n.pt")
 
 def authenticate():
     service_account_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_KEY"])
@@ -34,28 +35,21 @@ def get_latest_image(drive):
     return files[0]["id"], files[0]["name"]
 
 def download_image(drive, file_id):
-    request = drive.files().get_media(fileId=file_id)
-    data = request.execute()
+    data = drive.files().get_media(fileId=file_id).execute()
     img_array = np.frombuffer(data, np.uint8)
     return cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
 def count_balls(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.medianBlur(gray, 5)
+    results = model(img)[0]
+    count = 0
 
-    circles = cv2.HoughCircles(
-        gray,
-        cv2.HOUGH_GRADIENT,
-        dp=1.2,
-        minDist=30,
-        param1=50,
-        param2=30,
-        minRadius=10,
-        maxRadius=100
-    )
-    if circles is None:
-        return 0
-    return len(circles[0])
+    for b in results.boxes:
+        cls = int(b.cls[0])
+        label = model.names[cls].lower()
+        if "ball" in label or label in ["sports ball", "tennis ball"]:
+            count += 1
+
+    return count
 
 def main():
     drive = authenticate()
